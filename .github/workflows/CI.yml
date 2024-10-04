@@ -1,0 +1,409 @@
+name: CI
+defaults:
+  run:
+    working-directory: node-napi
+env:
+  DEBUG: napi:*
+  APP_NAME: node-napi
+  MACOSX_DEPLOYMENT_TARGET: "10.13"
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+"on":
+  push:
+    branches:
+      - main
+    tags-ignore:
+      - "**"
+    paths-ignore:
+      - "**/*.md"
+      - LICENSE
+      - "**/*.gitignore"
+      - .editorconfig
+      - docs/**
+  release:
+    types:
+      - published
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - target: x86_64-unknown-linux-gnu
+            host: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            host: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            host: ubuntu-latest
+          - target: armv7-unknown-linux-gnueabihf
+            host: ubuntu-latest
+          - target: armv7-unknown-linux-musleabihf
+            host: ubuntu-latest
+          - target: aarch64-linux-android
+            host: ubuntu-latest
+          - target: armv7-linux-androideabi
+            host: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            host: ubuntu-latest
+          - target: riscv64gc-unknown-linux-gnu
+            host: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            host: windows-latest
+          - target: i686-pc-windows-msvc
+            host: windows-latest
+          - target: aarch64-pc-windows-msvc
+            host: windows-latest
+          - target: x86_64-apple-darwin
+            host: macos-latest
+          - target: aarch64-apple-darwin
+            host: macos-latest
+    name: Generate Bindings for ${{ matrix.settings.target }} - node@20
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "yarn"
+          cache-dependency-path: node-napi/yarn.lock
+      - name: "Install Rust Toolchain"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.settings.target }}
+      - name: Install ziglang
+        uses: goto-bus-stop/setup-zig@v2
+        if: ${{ matrix.settings.host == 'ubuntu-latest' }}
+        with:
+          version: 0.13.0
+      - name: Install cargo toolchains
+        uses: taiki-e/install-action@v2
+        if: ${{ matrix.settings.host == 'ubuntu-latest' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild,cargo-xwin
+      - name: "Install System Dependencies"
+        if: ${{ matrix.settings.host == 'ubuntu-latest' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-linux-gnu 
+          sudo apt-get install -y g++-riscv64-linux-gnu
+      - name: "Install Node Dependencies"
+        run: yarn install
+      - name: "Build project"
+        run: yarn build --target ${{ matrix.settings.target }}
+      - name: "Upload artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: node-napi/${{ env.APP_NAME }}.*.node
+          if-no-files-found: error
+  test-macOS-windows-binding:
+    name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
+    needs:
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            target: x86_64-apple-darwin
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+        node:
+          - "18"
+          - "20"
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: yarn
+          architecture: x64
+          cache-dependency-path: node-napi/yarn.lock
+      - name: Install dependencies
+        run: yarn install
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: node-napi
+      - name: Test bindings
+        run: yarn test
+  test-linux-x64-gnu-binding:
+    name: Test bindings on Linux-x64-gnu - node@${{ matrix.node }}
+    needs:
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - "18"
+          - "20"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: yarn
+          cache-dependency-path: node-napi/yarn.lock
+      - name: Install dependencies
+        run: yarn install
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-x86_64-unknown-linux-gnu
+          path: node-napi
+      - name: Test bindings
+        run: docker run --rm -v $(pwd):/build -w /build/node-napi node:${{ matrix.node }}-slim yarn test
+  test-linux-x64-musl-binding:
+    name: Test bindings on x86_64-unknown-linux-musl - node@${{ matrix.node }}
+    needs:
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - "18"
+          - "20"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: yarn
+          cache-dependency-path: node-napi/yarn.lock
+      - name: Install dependencies
+        run: |
+          yarn config set supportedArchitectures.libc "musl"
+          yarn install
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-x86_64-unknown-linux-musl
+          path: node-napi
+      - name: Test bindings
+        run: docker run --rm -v $(pwd):/build -w /build/node-napi node:${{ matrix.node }}-alpine yarn test
+  test-linux-aarch64-gnu-binding:
+    name: Test bindings on aarch64-unknown-linux-gnu - node@${{ matrix.node }}
+    needs:
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - "18"
+          - "20"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-aarch64-unknown-linux-gnu
+          path: node-napi
+      - name: Install dependencies
+        run: |
+          yarn config set supportedArchitectures.cpu "arm64"
+          yarn config set supportedArchitectures.libc "glibc"
+          yarn install
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+      - name: Setup and run tests
+        uses: addnab/docker-run-action@v3
+        with:
+          image: node:${{ matrix.node }}-slim
+          options: "--platform linux/arm64 -v ${{ github.workspace }}:/build -w /build/node-napi"
+          run: yarn test
+  test-linux-aarch64-musl-binding:
+    name: Test bindings on aarch64-unknown-linux-musl
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-aarch64-unknown-linux-musl
+          path: node-napi
+      - name: Install dependencies
+        run: |
+          yarn config set supportedArchitectures.cpu "arm64"
+          yarn config set supportedArchitectures.libc "musl"
+          yarn install
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+      - name: Setup and run tests
+        uses: addnab/docker-run-action@v3
+        with:
+          image: node:lts-alpine
+          options: "--platform linux/arm64 -v ${{ github.workspace }}:/build -w /build/node-napi"
+          run: yarn test
+  test-linux-arm-gnueabihf-binding:
+    name: Test bindings on armv7-unknown-linux-gnueabihf - node@${{ matrix.node }}
+    needs:
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        node:
+          - "18"
+          - "20"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-armv7-unknown-linux-gnueabihf
+          path: node-napi
+      - name: Install dependencies
+        run: |
+          yarn config set supportedArchitectures.cpu "arm"
+          yarn install
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+      - run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+      - name: Setup and run tests
+        uses: addnab/docker-run-action@v3
+        with:
+          image: node:${{ matrix.node }}-bullseye-slim
+          options: "--platform linux/arm/v7 -v ${{ github.workspace }}:/build -w /build/node-napi"
+          run: yarn test
+  build-mac-universal:
+    name: Generate Bindings for universal-apple-darwin - node@20
+    needs:
+      - build
+    runs-on: macos-latest
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+          cache-dependency-path: node-napi/yarn.lock
+      - name: Install dependencies
+        run: yarn install
+      - name: Download macOS x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-x86_64-apple-darwin
+          path: node-napi/artifacts
+      - name: Download macOS arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-aarch64-apple-darwin
+          path: node-napi/artifacts
+      - name: Combine binaries
+        run: yarn universal
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-universal-apple-darwin
+          path: node-napi/${{ env.APP_NAME }}.*.node
+          if-no-files-found: error
+  publish-npmjs:
+    name: Publish to npmjs registry
+    if: github.event_name == 'release' && github.event.action == 'published'
+    runs-on: ubuntu-latest
+    needs:
+      - test-macOS-windows-binding
+      - test-linux-x64-gnu-binding
+      - test-linux-x64-musl-binding
+      - test-linux-aarch64-gnu-binding
+      - test-linux-aarch64-musl-binding
+      - test-linux-arm-gnueabihf-binding
+      - build-mac-universal
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          registry-url: "https://registry.npmjs.org"
+      - name: Get package.json version
+        id: package-version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+      - name: Install dependencies
+        if: steps.package-version.outputs.version == github.ref_name
+        run: yarn install
+      - name: Download all artifacts
+        if: steps.package-version.outputs.version == github.ref_name
+        uses: actions/download-artifact@v4
+        with:
+          path: node-napi
+          merge-multiple: true
+      - name: Publish
+        if: steps.package-version.outputs.version == github.ref_name
+        run: |
+          npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+  publish-github:
+    name: Publish to github packages
+    if: github.event_name == 'release' && github.event.action == 'published'
+    runs-on: ubuntu-latest
+    needs:
+      - test-macOS-windows-binding
+      - test-linux-x64-gnu-binding
+      - test-linux-x64-musl-binding
+      - test-linux-aarch64-gnu-binding
+      - test-linux-aarch64-musl-binding
+      - test-linux-arm-gnueabihf-binding
+      - build-mac-universal
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@flexpilot-ai"
+      - name: Get package.json version
+        id: package-version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+      - name: Install dependencies
+        if: steps.package-version.outputs.version == github.ref_name
+        run: yarn install
+      - name: Download all artifacts
+        if: steps.package-version.outputs.version == github.ref_name
+        uses: actions/download-artifact@v4
+        with:
+          path: node-napi
+          merge-multiple: true
+      - name: Publish
+        if: steps.package-version.outputs.version == github.ref_name
+        run: |
+          npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

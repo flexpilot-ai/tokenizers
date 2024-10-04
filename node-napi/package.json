@@ -1,0 +1,66 @@
+{
+  "name": "@flexpilot-ai/tokenizers",
+  "version": "0.0.1",
+  "description": "Node.js binding for huggingface/tokenizers library",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "author": "mohanram",
+  "keywords": [
+    "transformers",
+    "transformers.js",
+    "huggingface",
+    "hugging face",
+    "machine learning",
+    "deep learning",
+    "artificial intelligence",
+    "AI",
+    "ML",
+    "tokenizer",
+    "huggingface tokenizer"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flexpilot-ai/tokenizers.git"
+  },
+  "bugs": {
+    "url": "https://github.com/flexpilot-ai/tokenizers/issues"
+  },
+  "homepage": "https://github.com/flexpilot-ai/tokenizers/tree/main/node-napi#readme",
+  "napi": {
+    "name": "node-napi",
+    "triples": {
+      "additional": [
+        "aarch64-apple-darwin",
+        "aarch64-linux-android",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "aarch64-pc-windows-msvc",
+        "armv7-unknown-linux-gnueabihf",
+        "armv7-unknown-linux-musleabihf",
+        "x86_64-unknown-linux-musl",
+        "i686-pc-windows-msvc",
+        "armv7-linux-androideabi",
+        "universal-apple-darwin",
+        "riscv64gc-unknown-linux-gnu"
+      ]
+    }
+  },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4",
+    "ava": "^6.0.1"
+  },
+  "ava": {
+    "timeout": "3m"
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "ava",
+    "universal": "napi universal"
+  },
+  "packageManager": "yarn@4.5.0"
+}
